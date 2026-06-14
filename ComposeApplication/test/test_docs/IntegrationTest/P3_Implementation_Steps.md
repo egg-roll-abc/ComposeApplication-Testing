@@ -54,7 +54,7 @@ ProfileScreen 有两个 AlertDialog（清空确认、关于），Dialog 交互�
 |---|---------|---------|------|
 | 5 | `clickAbout_opensAboutDialog` | 点击"关于"弹出 Dialog | ✅ 通过 |
 | 6 | `clickAboutDismiss_closesAboutDialog` | 点击"知道了"关闭 | ✅ 通过 |
-| 7 | `clickClearAll_opensClearConfirmDialog` | 点击"清空全部账单"弹出确认 | ❌ 未通过（waitUntil+assertIsDisplayed 超时） |
+| 7 | `clickClearAll_opensClearConfirmDialog` | 点击"清空全部账单"弹出确认 | ✅ 通过（根因：onNodeWithText 精确匹配→改用 substring=true） |
 | 8 | `cancelClear_closesDialogWithoutClearing` | 取消清空 → 数据保留 | ✅ 通过 |
 
 #### 3. 状态流转测试（4 条）
@@ -65,7 +65,7 @@ ProfileScreen 有两个 AlertDialog（清空确认、关于），Dialog 交互�
 | 10 | `withData_monthlyStatsShowCurrentMonthOnly` | 月度统计仅显示当月数据 | ✅ 通过 |
 | 11 | `withData_topExpenseCardShowsCategories` | 有支出数据时 TopExpenseCard 显示排名 | ✅ 通过 |
 | 12 | `confirmClear_clearsAllDataAndShowsSnackbar` | 确认清空 → 数据归零 + Snackbar | ✅ 通过 |
-| 13 | `clearFailure_showsErrorSnackbar` | 清空异常 → 数据保留 + 错误提示 | ❌ 未通过 |
+| 13 | `clearFailure_showsErrorSnackbar` | 清空异常 → 数据保留 + 错误提示 | ✅ 通过（改为验证 Snackbar + 数据未清空） |
 
 #### 4. 数据绑定测试（2 条）
 
@@ -181,7 +181,7 @@ onNodeWithText("此操作不可恢复").assertExists()  // 找不到 Dialog 中�
 - `waitUntil(3000) + assertExists` 在无数据时超时，可能是因为无数据时点击本身未生效（布局太短，SettingsItem 在底部边缘）
 - **有数据 + waitUntil(3000) + assertExists** 的组合尚未尝试——数据确保点击生效，waitUntil 确保等待异步组合完成
 
-### 3.7 七次运行：clickClearAll 仍失败 — 确认为 Compose 测试框架局限性
+### 3.7 七次运行：clickClearAll 仍失败 — 初步误判为 Compose 框架局限性
 
 **结果**：有数据 + `waitUntil(3000) + assertExists` 仍然 ComposeTimeoutException，3 秒内节点从未出现。
 
@@ -195,16 +195,57 @@ onNodeWithText("此操作不可恢复").assertExists()  // 找不到 Dialog 中�
 | 4 | performScrollTo + performClick | 有 | assertExists（同步） | ❌ 节点不存在 |
 | 5 | performScrollTo + performClick | 有 | waitUntil(3000) + assertExists | ❌ ComposeTimeoutException |
 
-**最终根因分析**：
+**初步结论（后证实为误判）**：`cancelClear_closesDialogWithoutClearing` 能成功与 Dialog 交互（点击"取消"），但 `clickClearAll` 无法通过 `onNodeWithText` 找到 Dialog 中的文本节点，误判为 Compose 测试框架对 AlertDialog 独立窗口语义树访问的已知局限性。
 
-`cancelClear_closesDialogWithoutClearing` 能成功与 Dialog 交互（点击"取消"），但 `clickClearAll` 无法通过 `onNodeWithText` 找到 Dialog 中的文本节点，两者的关键区别在于：
+**处理方式**：`clickClearAll_opensClearConfirmDialog` 暂时标记为 `@Ignore`，注明待用 `printToLog()` 打印语义树排查。
 
-- `cancelClear` 使用 `performClick("取消")` 与 Dialog 交互——`performClick` 内部有隐式等待机制，可以定位到 AlertDialog 独立窗口中的按钮节点
-- `clickClearAll` 使用 `onNodeWithText("此操作不可恢复").assertExists()` 断言——`onNodeWithText` 无法在 AlertDialog 的独立窗口中搜索到 Dialog 的 body 文本节点
+### 3.8 八次运行：语义树排查 — 根因定位
 
-这是 Compose 测试框架对 AlertDialog 独立窗口语义树访问的**已知局限性**：`performClick` 等交互操作可以通过框架内部机制定位到独立窗口中的节点，但 `onNodeWithText` + `assertExists`/`assertIsDisplayed` 等断言操作无法可靠地搜索到独立窗口中的文本节点。具体根因需在真实设备上用 `printToLog()` 打印语义树进一步排查。
+**排查方法**：在 `clickClearAll_opensClearConfirmDialog` 中添加语义树遍历代码，用 `onAllNodes(isRoot())` 打印所有根节点及其子节点文本。
 
-**处理方式**：`clickClearAll_opensClearConfirmDialog` 标记为 `@Ignore`，注明原因和待排查方向，不删除用例。P3 测试用例编写工作到此结束。
+**关键发现**：`onRoot()` 在 Dialog 打开后崩溃，报错 `Expected exactly '1' node but found '2' nodes that satisfy: (isRoot)`——证实 AlertDialog 在独立窗口中渲染，语义树存在两个根节点。
+
+**语义树遍历输出**：
+
+```
+Found 2 root nodes
+
+Root #0: rect=(0,0,720,1280), children=1    ← 主窗口（ProfileScreen）
+  Text: [记账 Demo]
+  Text: [本地存储 · 隐私安全]
+  Text: [累计统计]
+  Text: [共 1 笔账单]
+  ...
+  Text: [清空全部账单, 删除本地所有记账记录]  ← SettingsItem
+  ...
+
+Root #1: rect=(0,0,640,422), children=1     ← AlertDialog 独立窗口
+  Text: [清空全部账单]                       ← Dialog 标题
+  Text: [将删除本地全部记账记录，此操作不可恢复，确定继续吗？]  ← Dialog body（完整一句话！）
+  Text: [取消]                               ← dismissButton
+  Text: [清空]                               ← confirmButton
+```
+
+**🔴 真正根因**：AlertDialog body 的文本是完整的一句话 `"将删除本地全部记账记录，此操作不可恢复，确定继续吗？"`，作为一个整体文本节点存在于语义树中。而 `onNodeWithText("此操作不可恢复")` 默认使用**精确匹配**，无法匹配包含该子串的完整句子，所以 `assertExists()` 始终失败。
+
+**之前的所有误判**：
+- 误判为"AlertDialog 独立窗口语义树不可见"——实际节点一直存在，只是匹配方式不对
+- 误判为"combine 异步链路时序问题"——实际与异步无关
+- 误判为"Compose 测试框架局限性"——实际是测试代码的匹配参数不正确
+
+**修复**：`onNodeWithText("此操作不可恢复", substring = true)` — 改用子串匹配。
+
+### 3.9 九次运行：15/15 全部通过 ✅
+
+**结果**：
+
+```
+Finished 15 tests on Small_Phone_API_36(AVD) - 16
+BUILD SUCCESSFUL
+```
+
+- `clickClearAll_opensClearConfirmDialog`：`onNodeWithText("此操作不可恢复", substring = true).assertExists()` ✅ 通过
+- 其余 14 条用例全部保持通过
 
 ---
 
@@ -227,10 +268,12 @@ onNodeWithText("此操作不可恢复").assertExists()  // 找不到 Dialog 中�
 | ViewModel 直接驱动 Dialog 状态在测试中不可靠 | `showClearConfirm.value = true` 触发 combine 异步重发射，AlertDialog 在独立窗口渲染，assertIsDisplayed() 检测到语义节点但窗口未显示 |
 | AlertDialog 在独立窗口渲染，assertIsDisplayed 可能失败 | `assertExists` 验证节点是否在组合中，`assertIsDisplayed` 验证窗口是否渲染完成，两者语义不同 |
 | assertExists 是同步断言，Dialog 异步组合链路需 waitUntil 配合 | performClick 触发 onClearAllClick() → showClearConfirm=true → combine 重发射 → collectAsState 更新 → 重组 → Dialog 进入组合，整条链路异步；`assertExists` 立即执行时 Dialog 可能尚未进入组合，需 `waitUntil { assertExists() }` 轮询等待；`performClick` 内部隐式等待节点可用，因此 `cancelClear` 中 `onNodeWithText("取消").performClick()` 自然覆盖了等待 |
-| onNodeWithText 无法可靠断言 AlertDialog 独立窗口中的文本节点 | `performClick` 等交互操作可通过框架内部机制定位独立窗口节点，但 `onNodeWithText` + `assertExists`/`assertIsDisplayed` 无法可靠搜索到 AlertDialog body 文本；这是 Compose 测试框架的已知局限性，具体根因需用 `printToLog()` 打印语义树排查 |
+| onNodeWithText 精确匹配 vs 子串匹配 | **核心教训**：AlertDialog body 文本是完整的一句话（如 `"将删除本地全部记账记录，此操作不可恢复，确定继续吗？"`），作为单个文本节点存在于语义树中。`onNodeWithText("此操作不可恢复")` 默认精确匹配，无法匹配包含该子串的完整句子。必须使用 `onNodeWithText("此操作不可恢复", substring = true)` 子串匹配。此问题曾误判为"Compose 框架对 AlertDialog 独立窗口的局限性"，实际只是匹配参数不正确 |
+| onRoot() 在 AlertDialog 打开后崩溃 | AlertDialog 在独立窗口渲染，语义树存在两个根节点（主窗口 + Dialog 窗口），`onRoot()` 期望恰好 1 个根节点会抛异常。需用 `onAllNodes(isRoot())` 遍历所有根节点 |
+| 语义树排查方法 | 当 `onNodeWithText` 找不到预期节点时，优先用 `onAllNodes(isRoot())` + `fetchSemanticsNodes()` 遍历打印完整语义树，确认节点文本的实际内容，避免盲目猜测根因 |
 | 快速状态变化可导致 AlertDialog 窗口与语义树不同步 | 异常路径中 snackbarMessage 连续变化触发多次重组，Dialog 窗口状态可能被影响，甚至节点完全从语义树消失 |
 | 金额文本在同一页面多卡片中重复 | StatsCard（收入/支出/结余）+ TopExpenseCard 金额可能重复，需设计不重复的测试数据 |
-| "清空全部账单"在 SettingsItem + Dialog 标题中重复 | 用 Dialog 独有文本"此操作不可恢复"区分 |
+| "清空全部账单"在 SettingsItem + Dialog 标题中重复 | 用 Dialog 独有文本"此操作不可恢复"区分，需使用 `substring = true` 子串匹配 |
 | FakeDao 需支持 deleteAll 异常模拟 | 新增 `deleteAllShouldThrow` 标志，与 `insertShouldThrow`/`deleteShouldThrow` 对齐 |
 | **绝对不可以因为任何原因修改源代码** | 测试失败时，如确实是源代码问题，应如实记录和汇报。修改源代码使测试通过违背了测试的目的——测试的职责是发现问题，不是掩盖问题 |
 
@@ -253,11 +296,11 @@ onNodeWithText("此操作不可恢复").assertExists()  // 找不到 Dialog 中�
 
 ### 测试结果
 
-**14/15 用例通过**，1 条 `@Ignore`
+**15/15 用例全部通过** ✅
 
 - 初始状态：4/4 通过
-- 用户交互：3/4（`clickClearAll_opensClearConfirmDialog` 标记 `@Ignore`，Compose 测试框架无法可靠断言 AlertDialog 独立窗口文本节点）
-- 状态流转：4/5（`clearFailure_showsErrorSnackbar` 改为验证 Snackbar + 数据未清空，已通过）
+- 用户交互：4/4 通过（`clickClearAll_opensClearConfirmDialog` 已修复，根因：`onNodeWithText` 精确匹配无法匹配 AlertDialog body 的完整句子，改用 `substring = true` 子串匹配）
+- 状态流转：5/5 通过（`clearFailure_showsErrorSnackbar` 改为验证 Snackbar + 数据未清空，已通过）
 - 数据绑定：2/2 通过
 
 ### 发现的源代码缺陷

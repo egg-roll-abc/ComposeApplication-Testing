@@ -34,10 +34,10 @@
 | P0 | HomeScreen + HomeViewModel | 19 | 19 | 100% |
 | P1 | RecordFormDialog + DeleteConfirmDialog | 25 | 25 | 100% |
 | P2 | DateFilterBar | 10 | 10 | 100% |
-| P3 | ProfileScreen + ProfileViewModel | 15 | 14 | 93.3%（1条@Ignore） |
+| P3 | ProfileScreen + ProfileViewModel | 15 | 15 | 100% |
 | P4 | ContentHome + NavigationBar | 7 | 7 | 100% |
 | P5 | 沙箱全链路测试 | 6 | 6 | 100% |
-| **合计** | | **82** | **81** | **98.8%** |
+| **合计** | | **82** | **82** | **100%** |
 
 ### 2.2 用例分类统计
 
@@ -48,7 +48,7 @@
 | 状态流转测试 | 17 |
 | 数据绑定测试 | 9 |
 | 全链路验收测试 | 6 |
-| 框架局限标记@Ignore | 1 |
+| 框架局限标记@Ignore | 0 |
 | 日期筛选专项 | 10 |
 
 ---
@@ -67,7 +67,7 @@
 | # | 问题 | 阶段 | 根因 | 影响 | 处理 |
 |---|------|------|------|------|------|
 | 3 | Material3 DatePicker 日历单元格不可交互 | P2 | 日期单元格用 `selectable` 修饰符，不注册 OnClick 语义；日号文本被语义合并覆盖 | 无法通过 UI 交互选择日期 | ViewModel.onDateChange() 驱动，与 DatePicker 确认效果等价 |
-| 4 | AlertDialog 独立窗口文本断言不可靠 | P3 | `onNodeWithText` + `assertExists`/`assertIsDisplayed` 无法可靠搜索 AlertDialog body 文本；`performClick` 可定位独立窗口节点但断言不行 | `clickClearAll_opensClearConfirmDialog` 用例标记 @Ignore | 不删除用例，注明框架局限性，待 Compose 测试框架更新后重试 |
+| 4 | AlertDialog body 文本精确匹配失败 | P3 | `onNodeWithText("此操作不可恢复")` 默认精确匹配，但 AlertDialog body 是完整一句话 `"将删除本地全部记账记录，此操作不可恢复，确定继续吗？"`，精确匹配找不到 | 改用 `onNodeWithText("此操作不可恢复", substring = true)` 子串匹配，用例已通过 |
 
 ### 3.3 语义节点定位问题
 
@@ -77,7 +77,7 @@
 | 6 | 输入框 placeholder "0.00" 不可达 | P0 | `OutlinedTextField` placeholder 不在 EditableText 语义中 | `hasSetTextAction() and hasText("金额")` 组合定位 |
 | 7 | "收入"/"支出"在 SegmentedButton 和 SummaryCard 重复 | P1 | Dialog 浮层下背景节点仍在语义树中 | `hasText("支出") and hasClickAction()` 区分 |
 | 8 | FilterChip 分类名与 RecordItem 重复 | P1 | 两者都有 click 动作，hasClickAction 无法区分 | 改为验证输入框预填值或用完整上下文文本 |
-| 9 | "清空全部账单"在 SettingsItem 和 Dialog 标题重复 | P3 | 两处文本相同 | 用 Dialog 独有文本"此操作不可恢复" |
+| 9 | "清空全部账单"在 SettingsItem 和 Dialog 标题重复 | P3 | 两处文本相同 | 用 Dialog 独有文本"此操作不可恢复"（需 `substring = true`） |
 | 10 | StatsCard 金额在累计和月度统计重复 | P3/P5 | 当月数据与累计数据相同时金额完全相同 | `onAllNodesWithText("金额")[0]` 取第一个或用不重复数据 |
 | 11 | 金额输入框 hasSetTextAction 匹配多个 | P0 | 金额和备注输入框都有 SetText 语义 | `hasSetTextAction() and hasText("金额")` 组合条件 |
 | 12 | `hasRole(Role.RadioButton)` 不可用 | P1 | 当前 Compose Test 版本无此 API | 改用 `hasClickAction()` 替代 |
@@ -132,7 +132,7 @@
 | `HomeScreenIntegrationTest.kt` | 19 | P0：HomeScreen + HomeViewModel |
 | `RecordDialogIntegrationTest.kt` | 25 | P1：RecordFormDialog + DeleteConfirmDialog |
 | `DateFilterBarIntegrationTest.kt` | 10 | P2：DateFilterBar |
-| `ProfileScreenIntegrationTest.kt` | 15 | P3：ProfileScreen + ProfileViewModel（1条@Ignore） |
+| `ProfileScreenIntegrationTest.kt` | 15 | P3：ProfileScreen + ProfileViewModel |
 | `ContentHomeIntegrationTest.kt` | 7 | P4：ContentHome + NavigationBar |
 | `SandboxFullChainTest.kt` | 6 | P5：沙箱全链路测试 |
 
@@ -160,7 +160,8 @@
 | 唯一文本节点 | `onNodeWithText("文本")` | 最简单直接 |
 | 可交互与不可交互节点文本重复 | `hasText("文本") and hasClickAction()` | 区分 SegmentedButton/FilterChip 与纯文本标签 |
 | 多个输入框 | `hasSetTextAction() and hasText("标签", substring = true)` | 精确定位目标输入框 |
-| Dialog 正文与背景重复 | 完整上下文文本（如 `"确定删除「餐饮」"`） | Dialog 独有文本不会重复 |
+| Dialog 正文与背景重复 | 完整上下文文本或 `substring = true` | Dialog body 可能是完整一句话，精确匹配会失败 |
+| AlertDialog body 子串匹配 | `onNodeWithText("关键字", substring = true)` | body 文本是完整句子，精确匹配找不到，需子串匹配 |
 | 多卡片同金额 | `onAllNodesWithText("金额")[0]` | 取第一个验证存在即可 |
 | placeholder 文本 | 不可用 `onNodeWithText` | placeholder 不注册 EditableText 语义 |
 
@@ -172,7 +173,7 @@
 | 编辑模式修改 | `performTextReplacement("新值")` | 已有预填值，需替换而非追加 |
 | 不在可视区域的节点 | `performScrollTo()` → `performClick()` | 先滚动再交互 |
 | DatePicker 日期选择 | `ViewModel.onDateChange()` 驱动 | 日历单元格无 OnClick 语义 |
-| AlertDialog 文本断言 | 不可靠 | `performClick` 可定位独立窗口节点但 `assertExists`/`assertIsDisplayed` 不行 |
+| AlertDialog 文本断言 | `onNodeWithText("文本", substring = true)` | body 文本是完整句子，精确匹配找不到，需子串匹配 |
 | Snackbar 等异步结果 | `waitUntil(timeout) { assertIsDisplayed() }` | 异步操作需轮询等待 |
 
 ### 7.3 架构级经验
@@ -190,15 +191,15 @@
 
 | 退出标准 | 达成情况 | 说明 |
 |---------|---------|------|
-| 所有页面组件集成测试用例 100% 通过 | ⚠️ 98.8%（81/82） | P3 有 1 条 `@Ignore`（Compose 测试框架无法可靠断言 AlertDialog 独立窗口文本），非源代码问题 |
+| 所有页面组件集成测试用例 100% 通过 | ✅ 达成 | 82/82 用例全部通过（P3 clickClearAll 根因已定位并修复） |
 | 核心业务全链路流程跑通（5 条链路） | ✅ 达成 | 5 条链路全部通过，无崩溃、无功能阻断问题 |
 | 严重、高级 bug 清零 | ⚠️ 1 条中等级缺陷 | `ProfileViewModel.onConfirmClearAll()` catch 块未关闭 Dialog，已记录待修复 |
 
 ### 退出标准评估
 
-集成测试**基本达成**退出标准：
+集成测试**全部达成**退出标准：
 
-- 81/82 用例通过（98.8%），唯一未通过用例因 Compose 测试框架对 AlertDialog 独立窗口的已知局限性而标记 `@Ignore`，非源代码缺陷
+- 82/82 用例通过（100%），P3 `clickClearAll_opensClearConfirmDialog` 根因已定位（`onNodeWithText` 精确匹配 vs AlertDialog body 完整句子），改用 `substring = true` 修复
 - 5 条核心业务全链路全部跑通，无崩溃、无功能阻断
 - 发现 1 条源代码缺陷（ProfileViewModel catch 块未关闭 Dialog），已记录，建议修复
 
@@ -209,5 +210,3 @@
 | # | 事项 | 优先级 | 说明 |
 |---|------|--------|------|
 | 1 | 修复 ProfileViewModel.onConfirmClearAll() catch 块 | 中 | 在 catch 块中添加 `showClearConfirm.value = false` |
-| 2 | P3 @Ignore 用例待 Compose 测试框架更新后重试 | 低 | `clickClearAll_opensClearConfirmDialog`，框架局限性导致无法断言 AlertDialog body 文本 |
-| 3 | 用 `printToLog()` 排查 AlertDialog 语义树 | 低 | 在真机上打印语义树，进一步确认框架局限性根因 |
