@@ -137,13 +137,9 @@ class ProfileScreenIntegrationTest {
             .assertDoesNotExist()
     }
 
-    // TODO: 移除 @Ignore 并修复此用例
-    // Compose 测试框架局限性：onNodeWithText 无法可靠断言 AlertDialog 独立窗口中的文本节点。
-    // performClick 等交互操作可通过框架内部机制定位独立窗口节点（cancelClear 能点击"取消"），
-    // 但 onNodeWithText + assertExists/assertIsDisplayed 无法搜索到 AlertDialog body 文本。
-    // 已尝试全部组合（有/无数据 × assertExists/waitUntil+assertExists/waitUntil+assertIsDisplayed）均失败。
-    // 待排查：用 printToLog() 打印语义树确认节点是否存在于独立窗口语义树中。
-    @Ignore("Compose 测试框架无法可靠断言 AlertDialog 独立窗口文本节点")
+    // 根因已定位：AlertDialog body 文本是完整的一句话 "将删除本地全部记账记录，此操作不可恢复，确定继续吗？"，
+    // 而非分段文本。onNodeWithText 默认精确匹配，搜不到 "此操作不可恢复"。
+    // 修复：使用 substring = true 进行子串匹配。
     @Test
     fun clickClearAll_opensClearConfirmDialog() {
         fakeDao.setRecords(listOf(
@@ -159,7 +155,18 @@ class ProfileScreenIntegrationTest {
             .performScrollTo()
             .performClick()
 
-        composeTestRule.onNodeWithText("此操作不可恢复")
+        // 等待 Dialog 组合完成
+        composeTestRule.waitUntil(5000) {
+            try {
+                composeTestRule.onNodeWithText("取消").assertExists()
+                true
+            } catch (e: AssertionError) {
+                false
+            }
+        }
+
+        // AlertDialog body 文本是完整句子，需用 substring=true 匹配
+        composeTestRule.onNodeWithText("此操作不可恢复", substring = true)
             .assertExists()
     }
     @Test
